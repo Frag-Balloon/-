@@ -1,0 +1,70 @@
+def LHD(nn,kk,seed=None):
+    '''
+    生成随机的拉丁超立方设计
+    '''
+    para=np.empty((nn,kk))
+    rng=np.random.default_rng(seed) if (seed is not None) else np.random.default_rng()
+    index=np.arange(nn)
+    for i in range(kk):
+        rng.shuffle(index)
+        para[:,i]=np.array(index)
+    return para/nn+1/(2*nn)
+def dis_loss(xx):
+    nn=xx.shape[0]
+    dis=np.ones((nn,nn))*np.inf
+    for i in range(nn):
+        for j in range((i+1),nn):
+            dis[i,j]=np.sum((xx[i,:]-xx[j,:])**2)
+    return dis,dis.min()
+def TH(xx,lim=3000,TT0=10,TE=1e-3,seed=None):
+    '''
+    模拟退火算法优化拉丁超立方设计
+    '''
+    ii=0
+        #迭代次数
+    dis,loss=dis_loss(xx)
+    nn=xx.shape[0]
+    index=np.arange(nn)
+    col=np.arange(xx.shape[1])
+    loss_rec=[]
+    pr_rec=[]
+    TT=TT0
+    rng=np.random.default_rng(seed) if (seed is not None) else np.random.default_rng()
+    while ii<=lim and TT>=TE:
+        swa=rng.choice(index,2,replace=False)
+            #要交换的两行的索引
+        if swa[0]>swa[1]:
+            swa=np.array([swa[1],swa[0]])
+        lx=rng.choice(col,1)
+        xx2=xx
+        xx2[[swa[0],swa[1]],lx]=xx2[[swa[1],swa[0]],lx]
+            #迭代尝试的新设计
+        dis2=dis
+        #只更新距离矩阵中，交换所影响到的位置
+        for i in range(swa[0]):
+            dis2[i,swa[0]]=np.sum((xx2[i,:]-xx2[swa[0],:])**2)
+            dis2[i,swa[1]]=np.sum((xx2[i,:]-xx2[swa[1],:])**2)
+        for i in range(swa[0]+1,nn):
+            dis2[swa[0],i]=np.sum((xx2[i,:]-xx2[swa[0],:])**2)
+        for i in range(swa[0]+1,swa[1]):
+            dis2[i,swa[1]]=np.sum((xx2[i,:]-xx2[swa[1],:])**2)
+        for i in range(swa[1]+1,nn):
+            dis2[swa[1],i]=np.sum((xx2[i,:]-xx2[swa[1],:])**2)
+        new_loss=dis2.min()
+        if new_loss>=loss:
+            loss=np.array(new_loss)
+            xx=np.array(xx2)
+            dis=dis2
+            loss_rec.append(loss)
+        else:
+            pr=np.exp((new_loss-loss)/TT)
+            if rng.uniform()<pr:
+                loss=np.array(new_loss)
+                xx=np.array(xx2)
+                dis=dis2
+                loss_rec.append(loss)
+            pr_rec.append(pr)
+        ii+=1
+        TT=TT0/np.log(1+ii)
+    print('更新{}次'.format(ii))
+    return xx,dis,loss_rec,pr_rec

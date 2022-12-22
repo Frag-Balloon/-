@@ -1,0 +1,147 @@
+
+import numpy as np
+import pandas as pd
+import torch
+import matplotlib.pyplot as plt
+import time
+import pickle
+
+def tor(xx):
+    return torch.tensor(xx,device='cuda:0',dtype=torch.float64)
+def dea(xx):
+    return xx.cpu().detach().numpy()
+class LSR(torch.nn.Module):
+    def __init__(self,kki):
+        super().__init__()
+        self.ww=torch.nn.Parameter(
+            torch.tensor([0]*(kki+1),dtype=torch.float64,device='cuda:0'))
+    def forward(self,xx):
+        return xx.matmul(self.ww)
+def lrf(ep):
+    '''
+    学习率更新函数
+    '''
+    if ep<warmup:
+        return lr[0]
+    else:
+        return (ep-warmup)*(lr[1]-lr[0])/(epoch-warmup)+lr[0]
+
+seed=10
+std=[5,50]
+kk=[3,200]
+train_portion=0.8
+epoch=25
+
+nn=np.linspace(
+    start=1e4,
+    stop=8e5,
+    num=5,
+    endpoint=True,
+    dtype=int)
+
+para=np.array(
+    [
+        [0.41,26,0.000525047,0.075925,3]])
+    #para的各列分别是[bs_portion,epoch,lr0,lr1,warmup]
+
+tb=pd.DataFrame(columns=[
+    '编号','样本量','标准差','变量个数','模型类别',
+    '用时','epoch','测试集MSE','Batch_size','warmup','lr0','lr1'])
+te_num=0
+    #实验编号
+sequen={}
+    #键：实验编号
+    #值：
+        #列表
+            #0
+                #实验中的学习率列表
+            #1
+                #实验中的损失函数矩阵
+                    #[i,j]元素是第i个epoch，第j个batch的损失函数值
+repe=10
+for stdi,kki in zip(std,kk):
+    for nni in nn:
+        for bsi,epi,lr0,lr1,warmup in para:
+            bsi=int(bsi*nni*train_portion)
+            epi=int(epi)
+            lr=[lr0,lr1] if stdi<10 else [lr0/10,lr1/10]
+            rng=np.random.default_rng(seed)
+            data=np.empty((nni,kki+1))
+            data[:,0]=1
+            data[:,1:]=rng.uniform(50,100,(nni,kki))
+            ep=rng.normal(0,stdi,nni)
+            ww_true=np.ones(kki+1)*10
+            yy_true=np.expand_dims(
+                (np.expand_dims(ww_true,axis=0)*data).sum(axis=1)+ep,
+                axis=1)
+
+            index=np.arange(nni)
+            rng.shuffle(index)
+            sep=int(nni*train_portion)
+            train_x=data[index[:sep],:]
+            test_x=data[index[sep:],:]
+            train_y=yy_true[index[:sep],:]
+            test_y=yy_true[index[sep:],:]
+            train_x=tor(train_x)
+            test_x=tor(test_x)
+            train_y=tor(train_y)
+            test_y=tor(test_y)
+            bn_train=int(sep//bsi)
+            bn_test=int((nni-sep)//bsi)
+            if bn_train!=0:
+                train_x_bat=train_x[:bn_train*bsi].reshape((bn_train,bsi,-1))
+                train_y_bat=train_y[:bn_train*bsi].reshape((bn_train,bsi,-1))
+            else:
+                train_x_bat=train_x[None,...]
+                train_y_bat=train_y[None,...]
+                bn_train=1
+                bsi=train_x.shape[0]
+            if bn_test!=0:
+                test_x_bat=test_x[:bn_test*bsi].reshape((bn_test,bsi,-1))
+                test_y_bat=test_y[:bn_test*bsi].reshape((bn_test,bsi,-1))
+            else:
+                test_x_bat=test_x[None,...]
+                test_y_bat=test_y[None,...]
+                bn_test=1
+                
+            t1=time.time()
+            mse_plain_lse=np.empty(repe)
+            for u in range(repe):
+                ww_lse=(train_x.T.matmul(train_x))\
+                .inverse().matmul(train_x.T).matmul(train_y)
+                test_y_pred=test_x.matmul(ww_lse)
+                mse_plain_lse[u]=((test_y-test_y_pred)**2).mean().detach().cpu().numpy()
+            
+            t2=time.time()
+            mse_plain_sequntial=np.empty(u)
+            for u in range(u):
+                mod=LSR(kki)
+                try:
+                    lof
+                except Exception:
+                    lof=torch.nn.MSELoss()
+                opt=torch.optim.SGD(mod.parameters(),lr=lr[0])
+                loss_rec=np.empty((epi,bn_train))
+                lr_rec=[]
+                scheduler=torch.optim.lr_scheduler.LambdaLR(opt,lrf)
+                for i in np.arange(epi):
+                    j=0
+                    for tr_x,tr_y in zip(train_x_bat,train_y_bat):
+                        pred=mod(tr_x)
+                        loss=lof(pred,tr_y[:,0])
+                        mod.zero_grad()
+                        loss.backward()
+                        opt.step()
+                        loss_rec[i,j]=loss.cpu().detach().numpy()
+                        j+=1
+                    lr_rec.append(scheduler.get_last_lr())
+                    scheduler.step()
+                mse_plain_sequntial[u]=lof(mod(test_x),test_y[:,0]).detach().cpu().numpy()
+            t3=time.time()
+
+            
+            tb.loc[te_num]=[te_num,nni,stdi,kki,1,(t3-t2)/repe,epi,mse_plain_sequntial.mean(),bsi,
+                              warmup,lr0,lr1]
+            sequen[te_num]=[lr_rec,loss_rec]
+            tb.loc[te_num+1]=[te_num+1,nni,stdi,kki,0,(t2-t1)/repe,None,mse_plain_lse.mean(),None,None,None,None]
+            te_num+=2
